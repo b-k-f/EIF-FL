@@ -4,7 +4,7 @@ import numpy as np
 import pickle
 import random
 import re
-from ad_method import ensemble, kmeans, dbscan, optics
+from ad_method import ensemble, kmeans, dbscan, other_ens
 
 def generate_float_array(start, end, size):
     return [random.uniform(start, end) for _ in range(size)]
@@ -74,12 +74,14 @@ def ad_dataset(data_dir, ad_method):
                     pickle.dump(ad_metrics, f)            
             elif ad_method == 'ensemble':
                 clean_df, ad_metrics = ensemble(noise_df, prct)
-                with open(f'metrics_outliers_/{ad_method}_{base_name}.pkl', 'wb') as f:
+                with open(f'metrics_outliers/{ad_method}_{base_name}.pkl', 'wb') as f:
                     pickle.dump(ad_metrics, f)          
-                
-                # clean_df.reset_index(inplace = True, names= 'Date')
-                clean_df.to_csv(f'cleaned_data18/{base_name}.csv', index=False)
-                # clean_df.set_index('Date', inplace=True)
+            
+            elif ad_method == 'ood':
+                ad_metrics = other_ens(noise_df, prct)
+                with open(f'metrics_outliers/{ad_method}_{base_name}.pkl', 'wb') as f:
+                    pickle.dump(ad_metrics, f)         
+
             elif ad_method == 'svm':
                 ad_metrics = svm(noise_df, prct)
             elif ad_method == 'lof':

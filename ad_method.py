@@ -10,12 +10,57 @@ from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import accuracy_score,confusion_matrix,  precision_score, recall_score, f1_score, roc_auc_score, roc_curve, \
     average_precision_score, mean_squared_error, mean_absolute_error, adjusted_rand_score, davies_bouldin_score, calinski_harabasz_score, homogeneity_score, completeness_score, v_measure_score
 
 from kneed import KneeLocator
 
+def other_ens(df, prct):
+    X_train, X_test, y_train, y_test = train_test_split(df.iloc[:,:-1], df.iloc[:, -1], test_size=0.3, shuffle=False)
+    # Feature scaling
+    sc = StandardScaler()
+    x_train = sc.fit_transform(X_train.values[:200000])
+    sc_t = StandardScaler()
+    x_test = sc_t.fit_transform(X_test.values)  
+    #init
+    model1 = OneClassSVM(nu=0.5, kernel='linear', gamma="auto", shrinking=False)
+    model2 = IsolationForest(n_estimators=80, max_features=0.2, contamination=0.1, random_state=42)
+    model3 = LocalOutlierFactor(n_neighbors=20, contamination=0.1, novelty=True, n_jobs = -1)
+    #train
+    start_time = time.time()
+    model3.fit(x_train)
+    preds_model3 = model3.predict(x_train).reshape(-1, 1)   
+    after_code1_time = time.time()
+    print(after_code1_time - start_time)
+    preds_model2 = model2.fit_predict(x_train).reshape(-1, 1)    
+    after_code2_time = time.time()
+    print(after_code2_time - after_code1_time)
+
+    preds_model1 = model1.fit_predict(x_train).reshape(-1, 1)
+    after_code3_time = time.time()
+    print(after_code3_time - after_code2_time)
+    
+    # Stack the predictions horizontally
+    X_meta = np.hstack((preds_model1, preds_model2, preds_model3))    
+    # Assign labels based on the consensus of at least two base models
+    x_predictions = (np.sum(X_meta > 0, axis=1) >= 1).astype(int) * 2 - 1
+    
+    #test
+    ypreds_model1 = model1.predict(x_test).reshape(-1, 1)
+    ypreds_model2 = model2.predict(x_test).reshape(-1, 1)
+    ypreds_model3 = model2.predict(x_test).reshape(-1, 1)
+    
+    # Stack the predictions horizontally
+    stacked_X_test = np.hstack((ypreds_model1, ypreds_model2, ypreds_model3))
+    
+    # Assign labels based on the consensus of at least two base models
+    y_predictions = (np.sum(stacked_X_test > 0, axis=1) >= 1).astype(int) * 2 - 1
+    
+    ens_metrics = test_scores(y_test, y_predictions, x_test, 'ensemble', prct)
+    
+    # all_data = impute_outliers(X_train, X_test, x_predictions, y_predictions)
+    return ens_metrics
 def ensemble(df, prct):
     #split train test and normalize data
     X_train, X_test, y_train, y_test = train_test_split(df.iloc[:,:-1], df.iloc[:, -1], test_size=0.3, shuffle=False)
@@ -25,9 +70,8 @@ def ensemble(df, prct):
     x_test = sc_t.fit_transform(X_test.values)    
     
     #init
-    model1 = IsolationForest(n_estimators = 500, contamination=prct * 0.01)
-    model2 = EllipticEnvelope(store_precision=False, contamination= prct * 0.01, support_fraction = 0.85 )
-
+    model1 = IsolationForest(n_estimators = 700, contamination=prct * 0.01)
+    model2 = EllipticEnvelope(store_precision=False, contamination= prct * 0.01, support_fraction = 0.1)
     #train
     start_time = time.time()
     preds_model1 = model1.fit_predict(x_train).reshape(-1, 1)
@@ -73,11 +117,10 @@ def kmeans(df, prct):
         inertia.append(kmeans.inertia_)
 
     kn = KneeLocator(list(K), inertia, curve='convex', direction='decreasing')
-    # optimal_num_clusters = kn.knee
-    optimal_num_clusters = 4
+    optimal_num_clusters = kn.knee
     
     #train
-    kmeans = KMeans(n_clusters=optimal_num_clusters, init='k-means++', max_iter=300, n_init=10, random_state=0)
+    kmeans = KMeans(n_clusters=5, init='k-means++', max_iter=300, n_init=10, random_state=0)
     kmeans.fit(x_train)
     # Get cluster centers and labels
     x_cluster_centers = kmeans.cluster_centers_
@@ -85,7 +128,7 @@ def kmeans(df, prct):
     x_tr_tmp = X_train.reset_index(drop = True)    
     # Calculate the distance of each point to its cluster center
     distances = np.zeros(x_train.shape[0])
-    for i in range(optimal_num_clusters):
+    for i in range(5):
         distances[x_labels == i] = np.linalg.norm(x_tr_tmp[x_labels == i] - x_cluster_centers[i], axis=1)
 
     k = 1.5
@@ -103,7 +146,7 @@ def kmeans(df, prct):
     x_t_tmp = X_test.reset_index(drop = True)
     # Calculate the distance of each point to its cluster center
     distances = np.zeros(x_test.shape[0])
-    for i in range(optimal_num_clusters):
+    for i in range(5):
         distances[y_labels == i] = np.linalg.norm(x_t_tmp[y_labels == i] - y_cluster_centers[i], axis=1)
 
     # Set a threshold for anomaly detection (2 standard deviations from the mean distance)
@@ -125,16 +168,16 @@ def dbscan(df, prct):
     x_train = sc.fit_transform(X_train)
     sc_t = MinMaxScaler()
     x_test = sc_t.fit_transform(X_test)
-    min_samples_range = [1, 2]
-    eps_range = [0.01,0.07,0.05]
-    best_score = -1
-    best_eps =  -1
-    best_sample = -1
+    # min_samples_range = [1, 2]
+    # eps_range = [0.01,0.07,0.05]
+    # best_score = -1
+    # best_eps =  -1
+    # best_sample = -1
 
     # Grid search
 #     for min_samples in min_samples_range:
 #         for eps in eps_range:
-#             dbscan = DBSCAN(eps=eps, min_samples=min_samples, leaf_size= 10)
+#             dbscan = DBSCAN(eps=eps, min_samples=min_samples)
 #             lbls = dbscan.fit_predict(x_train[:10000])
 
 #             # Calculate silhouette score
@@ -144,7 +187,7 @@ def dbscan(df, prct):
 #                 best_score = silhouette_avg
 #                 best_eps =  eps
 #                 best_sample = min_samples
-    dbscan = DBSCAN(eps=0.02, min_samples=2, leaf_size= 10)
+    dbscan = DBSCAN(eps=0.04, min_samples=2, leaf_size= 10)
     model = dbscan.fit(x_train)
     x_labels = model.labels_
     
@@ -168,61 +211,6 @@ def dbscan(df, prct):
     # all_data = impute_outliers(X_train, X_test, X_train['labels'], X_test['labels'])
     return dbscan_metrics
     
-def optics(df, prct):
-    X_train, X_test, y_train, y_test = train_test_split(df.iloc[:,:-1], df.iloc[:, -1], test_size=0.3, shuffle=False)
-    sc = MinMaxScaler()
-    x_train = sc.fit_transform(X_train)
-    sc_t = MinMaxScaler()
-    x_test = sc_t.fit_transform(X_test)    
-    max_eps_ = [0.01, 0.05, 0.1, 0.5, 1] 
-    best_score = -1
-    best_eps = -1
-    # Grid search
-    # for max_eps in max_eps_:
-    #     opt = OPTICS(min_samples=2,max_eps = max_eps, metric='euclidean',p =2, algorithm='ball_tree',leaf_size=10)
-    #     lbls = opt.fit_predict(x_train[:10000])
-    #     # Calculate silhouette score
-    #     silhouette_avg = silhouette_score(x_train[:10000], lbls)
-    #     # Update best parameters if a higher silhouette score is achieved
-    #     if silhouette_avg > best_score:
-    #         best_score = silhouette_avg
-    #         best_eps = max_eps
-
-    model = OPTICS(min_samples=5, max_eps=1, metric='euclidean',p=2, algorithm='ball_tree',leaf_size=10)
-    model.fit(x_train)  
-
-    joblib.dump(model, f'saved_models/optics_model_p{prct}.pkl')
-    # Get cluster labels
-    labels = model.labels_
-    x_reachability_distances = model.reachability_
-    print('a')
-
-    #train
-    X_train.reset_index(inplace = True)
-    x_outlier_indices = np.where(x_reachability_distances > np.percentile(x_reachability_distances, 85))[0]    
-    print('b')
-    
-    x_filtered_data = X_train.drop(index=x_outlier_indices)
-    x_bad_data = X_train.loc[x_outlier_indices]
-    X_train['label'] = 1
-    X_train.loc[x_outlier_indices, 'label'] = -1
-    
-    #test
-    y_labels = model.fit_predict(x_test)
-    y_reachability_distances = model.reachability_
-    print('c')
-    X_test.reset_index(inplace = True)    
-    y_outlier_indices = np.where(y_reachability_distances > np.percentile(y_reachability_distances, 85))[0]
-    print('d')
-    y_filtered_data = X_test.drop(index=y_outlier_indices)
-    y_bad_data = X_test.loc[y_outlier_indices]
-    X_test['labels'] = 1
-    X_test.loc[y_outlier_indices, 'label'] = -1
-    optics_metrics = test_scores(y_test, X_test['labels'], x_test, 'optics', prct)
-    
-    # all_data = impute_outliers(X_train, X_test, X_train['labels'], X_test['labels'])
-    return optics_metrics
-
 def test_scores(y_test, y_predictions, x_test, ad_method, prct):
     # test scores
     acc = accuracy_score(y_test, y_predictions)
@@ -320,46 +308,3 @@ def impute_outliers(X_train, X_test, x_predictions, y_predictions):
     all_data_df = pd.DataFrame(all_data_arr, columns=X_train.columns)
 
     return all_data_df
-
-
-# def impute_outliers(X_train, X_test, x_predictions, y_predictions):
-#     #remove outliers by imputation with last good data
-#     # on train set
-#     X_train.reset_index(inplace = True)
-#     x_outlier_indices = np.where(x_predictions == -1)[0]
-#     x_good_indices = np.where(x_predictions == 1)[0]
-#     for outlier_index in x_outlier_indices:
-# #         if outlier_index == 0 :
-# #             previous_good_index = x_good_indices[outlier_index]
-# #         else:
-# #             print(x_good_indices, outlier_index)
-# #             # Find the nearest previous good index
-# #             previous_good_index = x_good_indices[x_good_indices < outlier_index][-1]         
-#         try:
-#             previous_good_index = x_good_indices[x_good_indices < outlier_index][-1] 
-#         except:
-#             previous_good_index = x_good_indices[outlier_index]
-#         # Replace the outlier value with the previous good value
-#         X_train.iloc[outlier_index] = X_train.iloc[previous_good_index]
-    
-#     # on test set
-#     X_test.reset_index(inplace = True)
-#     y_outlier_indices = np.where(y_predictions == -1)[0]
-#     y_good_indices = np.where(y_predictions == 1)[0]
-#     for outlier_index in y_outlier_indices:
-# #         if outlier_index == 0 :
-# #             previous_good_index = y_good_indices[outlier_index]
-# #         else:
-# #             # Find the nearest previous good index
-# #             previous_good_index = y_good_indices[y_good_indices < outlier_index][-1]
-#         try:
-#             previous_good_index = y_good_indices[y_good_indices < outlier_index][-1]
-#         except:
-#             previous_good_index = y_good_indices[outlier_index]
-#         # Replace the outlier value with the previous good value
-#         X_test.iloc[outlier_index] = X_test.iloc[previous_good_index]
-
-#     #combine into one df
-#     all_data = pd.concat([X_train, X_test])
-    
-#     return all_data
