@@ -3,7 +3,8 @@
 **Author:** Bouchra Fakher  
 **Published in:** Springer's Cluster Computing Journal  
 **Date:** 2025  
-**DOI:** Still Under Review  
+**DOI:** https://doi.org/10.1007/s10586-025-05764-5
+
 
 ## Abstract
 
