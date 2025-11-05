@@ -12,6 +12,8 @@ In today’s interconnected world, energy consumption forecasting faces challeng
 
 # For citation :
 
+```bibtex
+
 @article{fakher2025combining,
   title={Combining client-based anomaly detection and federated learning for energy forecasting in smart buildings},
   author={Fakher, Bouchra and Brahmia, Mohamed el Amine and Bennis, Ismail and Abouaissa, Abdelhafid},
